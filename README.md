@@ -12,3 +12,6 @@ The final list is contained in octanalysis_input.csv
 
 From there the data is split into 5 folds by subject ID.  Fold 0 will be validation to start and Folds != 0 will be the training set.
 
+# Recreate
+conda env create -f environment.yml -n my_new_env
+
