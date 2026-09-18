@@ -34,10 +34,13 @@ def main():
         train_list = json.load(f)
     with open("../local_data/val.json","r") as f:
         val_list = json.load(f)
+    """
     data = OCTDataModule(train_files=train_list, 
                         val_files=val_list,
                         batch_size = cfg['data']['batch_size'],
                         num_workers=4)
+    """
+    data = OCTDataModule(**cfg['data'])
     model = OCTClassifier(**cfg["model"])
 
     early_stopping = EarlyStopping(
@@ -64,7 +67,7 @@ def main():
         ],
     )
     for i in data.val_dataloader():
-        print(i['input'])
+        print(i['input'].shape)
         break
     trainer.fit(model, datamodule=data)
 

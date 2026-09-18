@@ -5,6 +5,8 @@ seed: 271828
 data:
   batch_size: 8
   num_workers: 4
+  train_files: ../local_data/train.json
+  val_files: ../local_data/val.json
 
 model:
   num_classes: 6
