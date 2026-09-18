@@ -89,7 +89,11 @@ class OCTDataModule(L.LightningDataModule):
     ):
         super().__init__()
         self.train_files = train_files
+        with open(train_files, "r") as f:
+            self.train_files = json.load(f)
         self.val_files = val_files
+        with open(val_files, "r") as f:
+            self.val_files = json.load(f)
         self.batch_size = batch_size
         self.num_workers = num_workers
 
