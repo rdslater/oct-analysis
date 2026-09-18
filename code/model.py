@@ -13,7 +13,8 @@ from monai.transforms import (
     ToTensord,
 )
 from torchmetrics import Accuracy
-
+import pandas as pd
+from lightning.pytorch.profilers import SimpleProfiler
 # ==============================================================================
 # 1. LightningModule: Model, Loss, Optimizer, & Metrics
 # ==============================================================================
@@ -44,8 +45,7 @@ class OCTClassifier(L.LightningModule):
         x, y = batch["input"], batch["targets"]
         logits = self(x)
         loss = self.criterion(logits, y)
-        preds = torch.argmax(logits, dim=1)
-        return loss, preds, y
+        return loss, logits, y
 
     def training_step(self, batch, batch_idx):
         loss, preds, targets = self._shared_step(batch)
@@ -66,6 +66,10 @@ class OCTClassifier(L.LightningModule):
             "val_acc": acc
         }, on_epoch=True, prog_bar=True)
 
+    def predict_step(self, batch, batch_idx):
+        _, preds, y = self._shared_step(batch)
+        return preds, y
+
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=1e-2)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
@@ -80,8 +84,8 @@ class OCTDataModule(L.LightningDataModule):
         self, 
         train_files: list, 
         val_files: list, 
-        batch_size: int = 8, 
-        num_workers: int = 16
+        batch_size: int = 32, 
+        num_workers: int = 8
     ):
         super().__init__()
         self.train_files = train_files
@@ -130,6 +134,7 @@ class OCTDataModule(L.LightningDataModule):
 # 3. Execution Example
 # ==============================================================================
 if __name__ == "__main__":
+    simple_profiler = SimpleProfiler(dirpath=".", filename="simple_profile_output")
     # Example dictionary structure for MONAI transforms:
     # train_files = [{"image": "path/to/oct1.nii.gz", "label": 0}, ...]
     with open("../local_data/train.json","r") as f:
@@ -137,7 +142,7 @@ if __name__ == "__main__":
     with open("../local_data/val.json","r") as f:
         val_list = json.load(f)
     # Initialize DataModule & Model
-    datamodule = OCTDataModule(train_files=train_list, val_files=val_list, batch_size=2)
+    datamodule = OCTDataModule(train_files=train_list, val_files=val_list, batch_size=32)
     model = OCTClassifier(num_classes=6, lr=1e-4)
 
     # Initialize PyTorch Lightning Trainer
@@ -146,8 +151,12 @@ if __name__ == "__main__":
         accelerator="auto",       # Uses CUDA if available
         devices=1,
         precision="16-mixed",     # Mixed precision saves VRAM for 3D volumes
-        log_every_n_steps=1
+        log_every_n_steps=50,
+        profiler=simple_profiler
     )
 
     # To run training:
     trainer.fit(model, datamodule=datamodule)
+    #output = trainer.predict(model,datamodule.val_dataloader())
+    #print(output)
+    #torch.save(output,"output.tensor")
