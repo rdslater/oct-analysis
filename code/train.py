@@ -4,7 +4,7 @@ import json
 import yaml
 import lightning as L
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-
+from lightning.pytorch.loggers import CSVLogger
 from model import OCTClassifier, OCTDataModule
 
 
@@ -42,7 +42,26 @@ def main():
     """
     data = OCTDataModule(**cfg['data'])
     model = OCTClassifier(**cfg["model"])
-
+    
+    logger = CSVLogger(
+	save_dir = str(Path.home() / "oct-score2-runs"),
+	name = cfg["experiment_name"],
+	flush_logs_every_n_steps=10,)
+ 
+    logger.log_hyperparams({
+	"config":cfg,
+	"model_class":type(model).__name__,
+	"backstone":type(model.model).__name__,
+	"optimizer":{
+		"name":"AdamW",
+		"weight_decay":0.01,
+	},
+	"scheduler":{
+		"name":"CosineAnnealingLR",
+		"T_max":10,
+	},
+     })
+	
     early_stopping = EarlyStopping(
         **cfg["early_stopping"]
     )
@@ -50,9 +69,7 @@ def main():
     checkpoint_config = cfg["checkpoint"].copy()
 
     checkpoint_config["dirpath"] = (
-        Path("outputs")
-        / cfg["experiment_name"]
-        / "checkpoints"
+        Path(logger.log_dir) / "checkpoints"
     )
 
     checkpoint = ModelCheckpoint(
@@ -61,6 +78,7 @@ def main():
 
     trainer = L.Trainer(
         **cfg["trainer"],
+	logger=logger,
         callbacks=[
             early_stopping,
             checkpoint,
