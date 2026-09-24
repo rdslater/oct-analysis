@@ -1,14 +1,25 @@
 #!/bin/bash
-#SBATCH --mem-per-cpu=16G
-#SBATCH --cpus-per-task=20
+#SBATCH --job-name=octScore2
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=64G
 #SBATCH --gpus-per-node=1
-#SBATCH --job-name=octScore2      # Name of the job
-#SBATCH --output=octScore2_output_%j.log   # Where to save the output
-#SBATCH --error=octScore2_error_%j.log     # Where to save errors
-#SBATCH --nodes=1                   # Run on a single node
-#SBATCH --ntasks=1                  # Run a single task
-#SBATCH --time=06:05:00             # Time limit (5 minutes)
+#SBATCH --time=06:00:00
+#SBATCH --output=octScore2_%j.out
+#SBATCH --error=octScore2_%j.err
 
-eval "$(conda shell.bash hook)"
+# Prevent CPU thread thrashing in PyTorch/NumPy
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export MKL_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+# Activate Conda environment safely
+source $(conda info --base)/etc/profile.d/conda.sh
 conda activate .score2
+
+# Print GPU and environment diagnostic information
+echo "Job started on node: $(hostname)"
+echo "Using GPU: $CUDA_VISIBLE_DEVICES"
+
+# Run Python script
 python3 train.py
