@@ -7,7 +7,7 @@
 #SBATCH --error=octScore2_error_%j.log     # Where to save errors
 #SBATCH --nodes=1                   # Run on a single node
 #SBATCH --ntasks=1                  # Run a single task
-#SBATCH --time=01:05:00             # Time limit (5 minutes)
+#SBATCH --time=06:05:00             # Time limit (5 minutes)
 
 eval "$(conda shell.bash hook)"
 conda activate .score2
