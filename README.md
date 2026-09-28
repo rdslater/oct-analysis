@@ -15,3 +15,8 @@ From there the data is split into 5 folds by subject ID.  Fold 0 will be validat
 # Recreate
 conda env create -f environment.yml -n my_new_env
 
+# Sept 2026
+Initial runs with batch size of 4-8 and 256x256x96 yielded 67% accuracy on a single question (Cystoid Spaces).  Doing some reaserch OCTs are not an even pixel shape with the Z (slice dimension) often being "bigger" (1 pixel movement in Z is roughly 5 in X and Y).  Thus the voxels are "skinny" in X and Y and "Long" in 7.
+
+Base on a research suggestion, going to 256x256x128 to try and keey the Z dimension from being flattened did improve results to ~75% accuracy.  During this time it was noted that the GPU is data starved.  I am attacking that in a number of ways.  I recently made numpy arrays in with dedicated uint8 encoding.  I am also considering saving a smaller format (such as the 256x256x128) to save read time.
+
