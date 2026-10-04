@@ -104,7 +104,7 @@ class OCTDataModule(L.LightningDataModule):
             ScaleIntensityd(keys=["input"]),
             Resized(
                 keys=["input"], 
-                spatial_size=(96, 256, 256), 
+                spatial_size=(128, 128, 128), 
                 mode="trilinear"
             ),
             ToTensord(keys=["input", "targets"]),
