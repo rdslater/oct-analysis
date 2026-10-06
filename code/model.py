@@ -6,6 +6,7 @@ import json
 from monai.networks.nets import SEResNet50
 from monai.transforms import (
     Compose,
+    CopyItemsd,
     LoadImaged,
     EnsureChannelFirstd,
     ScaleIntensityd,
@@ -68,7 +69,8 @@ class OCTClassifier(L.LightningModule):
 
     def predict_step(self, batch, batch_idx):
         _, preds, y = self._shared_step(batch)
-        return preds, y
+        file_path = batch["filename"]
+        return preds, y, file_path
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=1e-2)
@@ -99,7 +101,8 @@ class OCTDataModule(L.LightningDataModule):
 
         # Transforms designed for 512x496x97 OCT volumes
         self.transforms = Compose([
-            LoadImaged(keys=["input"]),
+            CopyItemsd(keys="input", names="filename"),
+            LoadImaged(keys=["input"],image_only=True),
             EnsureChannelFirstd(keys=["input"]),
             ScaleIntensityd(keys=["input"]),
             Resized(
@@ -107,7 +110,6 @@ class OCTDataModule(L.LightningDataModule):
                 spatial_size=(128, 128, 128), 
                 mode="trilinear"
             ),
-            ToTensord(keys=["input", "targets"]),
         ])
 
     def train_dataloader(self):
