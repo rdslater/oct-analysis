@@ -1,5 +1,6 @@
 import argparse
 from pathlib import Path
+import traceback
 import json
 import yaml
 import lightning as L
@@ -24,34 +25,51 @@ def load_config(path):
     with open(path) as f:
         return yaml.safe_load(f)
 
+def summarize_completed_run(trainer,logger):
+    if not trainer.is_global_zero or trainer.interrupted:
+        return
+    try:
+        #Flush pending metrics before reading this run's CSV file.
+        logger.save()
+        #import lazily
+        from summarize_metrics import summarize_metrics
+
+        summarize_metrics(logger.log_dir)
+    except Exception:
+        print(
+            "Warning:Training finished but automatic summary generation failed."
+            "Existed training outputs have not been removed.",
+                flush=True,
+        )
+        traceback.print_exc()
+        print(
+            f'Retry manually: python summarize_metrics.py"{logger.log_dir}"',
+            flush=True,
+        )
 
 def main():
     args = parse_args()
     cfg = load_config(args.config)
 
     L.seed_everything(cfg["seed"])
-    with open("../local_data/train.json","r") as f:
-        train_list = json.load(f)
-    with open("../local_data/val.json","r") as f:
-        val_list = json.load(f)
     """
-    data = OCTDataModule(train_files=train_list, 
+    data = OCTDataModule(train_files=train_list,
                         val_files=val_list,
                         batch_size = cfg['data']['batch_size'],
                         num_workers=4)
     """
     data = OCTDataModule(**cfg['data'])
     model = OCTClassifier(**cfg["model"])
-    
+
     logger = CSVLogger(
 	save_dir = str(Path.home() / "oct-score2-runs"),
 	name = cfg["experiment_name"],
 	flush_logs_every_n_steps=10,)
- 
+
     logger.log_hyperparams({
 	"config":cfg,
 	"model_class":type(model).__name__,
-	"backstone":type(model.model).__name__,
+	"backbone":type(model.model).__name__,
 	"optimizer":{
 		"name":"AdamW",
 		"weight_decay":0.01,
@@ -61,7 +79,7 @@ def main():
 		"T_max":10,
 	},
      })
-	
+
     early_stopping = EarlyStopping(
         **cfg["early_stopping"]
     )
@@ -88,9 +106,10 @@ def main():
         print(i['input'].shape)
         break
     trainer.fit(model, datamodule=data)
+    if  trainer.is_global_zero and not trainer.interrupted:
+   	 print(f"Best checkpoint: {checkpoint.best_model_path}", flush=True)
 
-    print(f"Best checkpoint: {checkpoint.best_model_path}")
-
+    summarize_completed_run(trainer, logger)
 
 if __name__ == "__main__":
     main()

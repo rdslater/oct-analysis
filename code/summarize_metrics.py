@@ -4,7 +4,7 @@ import argparse
 import pandas as pd
 import matplotlib
 
-matplotlib.use("Agg")  # 服务器不需要图形界面
+matplotlib.use("Agg")  
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator, PercentFormatter
 
@@ -42,19 +42,19 @@ def summarize_metrics(log_dir):
     if data.empty:
         raise ValueError("No epoch-level metrics have been recorded yet.")
 
-    # 同一 epoch 的指标可能分散在不同 CSV 行中。
-    # 保留各指标最后一个非空值，不重新平均 step 指标。
+    #same epoch's indicators can be in different rows。
+    
     epochs = data.groupby("epoch", sort=True)[METRICS].last()
     epochs.index = epochs.index.astype(int)
     epochs.index.name = "epoch"
 
-    # CSV 保留原始零基 epoch；另加便于阅读的一基轮数。
+    # CSV keep orginal epoch；but + 1 in order to read and understand。
     table = epochs.reset_index()
     table.insert(1, "round", table["epoch"] + 1)
     table["has_all_four_metrics"] = table[METRICS].notna().all(axis=1)
     table.to_csv(log_dir / "epoch_summary.csv", index=False)
 
-    # 图表使用从 1 开始的轮数；缺失值保持缺失，不填 0。
+    # 。
     rounds = epochs.index.to_numpy() + 1
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
 

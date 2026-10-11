@@ -19,7 +19,7 @@ from lightning.pytorch.profilers import SimpleProfiler
 # 1. LightningModule: Model, Loss, Optimizer, & Metrics
 # ==============================================================================
 class OCTClassifier(L.LightningModule):
-    def __init__(self, num_classes: int = 6, lr: float = 1e-4):
+    def __init__(self, num_classes: int = 6, lr: float = 1e-4, layers=(3,4,6,3)):
         super().__init__()
         self.save_hyperparameters()
         
@@ -29,7 +29,7 @@ class OCTClassifier(L.LightningModule):
             spatial_dims=3,
             in_channels=1,
             num_classes=num_classes,
-            layers=(3, 4, 6, 3),
+            layers=tuple(layers),
         )
         
         self.criterion = nn.CrossEntropyLoss()
