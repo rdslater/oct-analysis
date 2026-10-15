@@ -1,0 +1,10 @@
+Source root: /mnt/scratch/home/wisc/jiang452/oct-score2-runs
+Included runs: 5
+
+Configuration differs across selected runs: layers.
+Rows are sorted by observed minimum val_loss, not by proven model quality.
+Equal manifest paths do not prove equal data. Verify split contents, preprocessing, loss definition, and metric averaging manually.
+CSV files do not establish job completion or early-stopping reasons. Active or interrupted runs may be included; compare completed runs explicitly.
+Epochs are zero-based in the CSV; rounds and the plot are one-based. Accuracy values are fractions, not percentages.
+Each metric uses its last non-null value within an epoch. Multiple validation checks per epoch may not correspond to one shared evaluation event.
+A single run cannot establish a causal effect or statistical significance. No performance explanation is generated automatically.
