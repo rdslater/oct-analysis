@@ -9,11 +9,11 @@ data:
   val_files: ../local_data/val.json
 
 model:
-  num_classes: 6
+  num_classes: [5,5,5,5,3,6,5,5]
   lr: 0.001
 
 trainer:
-  max_epochs: 100
+  max_epochs: 1
   accelerator: auto
   devices: 1
 
