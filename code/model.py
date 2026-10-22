@@ -1,12 +1,13 @@
+import json
+from typing import Sequence
+
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import lightning as L
-import json
 from monai.networks.nets import SEResNet50
 from monai.transforms import (
     Compose,
-    CopyItemsd,
     LoadImaged,
     EnsureChannelFirstd,
     ScaleIntensityd,
@@ -14,63 +15,103 @@ from monai.transforms import (
     ToTensord,
 )
 from torchmetrics import Accuracy
-import pandas as pd
 from lightning.pytorch.profilers import SimpleProfiler
+
+
 # ==============================================================================
-# 1. LightningModule: Model, Loss, Optimizer, & Metrics
+# 1. LightningModule: shared backbone + N multiclass heads, combined loss
 # ==============================================================================
 class OCTClassifier(L.LightningModule):
-    def __init__(self, num_classes: int = 6, lr: float = 1e-4):
+    def __init__(
+        self,
+        num_classes: Sequence[int],          # e.g. (6, 3, 4, 6, 2, 5, 6) -> one entry per head
+        lr: float = 1e-4,
+        head_weights: Sequence[float] = None,
+    ):
+        """
+        num_classes : tuple/list with the number of classes for each head.
+                      len(num_classes) == number of heads.
+        head_weights: optional per-head loss weights; defaults to equal (loss = mean).
+        Batch targets must be a LongTensor of shape (B, len(num_classes)),
+        where column i holds labels in [0, num_classes[i]).
+        """
         super().__init__()
+        num_classes = tuple(int(c) for c in num_classes)
+        assert len(num_classes) > 0 and all(c >= 2 for c in num_classes), \
+            "num_classes must be a non-empty tuple/list of ints >= 2"
+        if head_weights is not None:
+            assert len(head_weights) == len(num_classes), "head_weights must match num_classes length"
         self.save_hyperparameters()
-        
-        # Anisotropic 3D SEResNet50 backbone
-        # Strides downsample H/W (256x256) first, preserving Depth (97 slices)
-        self.model = SEResNet50(
+
+        self.num_classes = num_classes
+        self.num_heads = len(num_classes)
+
+        # Shared 3D SEResNet50 backbone; strip its classifier to get pooled features
+        self.backbone = SEResNet50(
             spatial_dims=3,
             in_channels=1,
-            num_classes=num_classes,
+            num_classes=2,  # placeholder, replaced below
             layers=(3, 4, 6, 3),
         )
-        
+        feat_dim = self.backbone.last_linear.in_features
+        self.backbone.last_linear = nn.Identity()
+
+        # One linear head per target, each with its own number of classes
+        self.heads = nn.ModuleList([nn.Linear(feat_dim, c) for c in self.num_classes])
+
         self.criterion = nn.CrossEntropyLoss()
-        
-        # Metrics using TorchMetrics
-        self.train_acc = Accuracy(task="multiclass", num_classes=num_classes)
-        self.val_acc = Accuracy(task="multiclass", num_classes=num_classes)
+
+        w = torch.ones(self.num_heads) if head_weights is None else torch.tensor(head_weights, dtype=torch.float)
+        self.register_buffer("head_weights", w / w.sum())
+
+        # Per-head metrics, each sized to its head's class count
+        self.train_acc = nn.ModuleList(
+            [Accuracy(task="multiclass", num_classes=c) for c in self.num_classes]
+        )
+        self.val_acc = nn.ModuleList(
+            [Accuracy(task="multiclass", num_classes=c) for c in self.num_classes]
+        )
 
     def forward(self, x):
-        return self.model(x)
+        """Returns a list of logits tensors, one (B, C_i) per head."""
+        feats = self.backbone(x)
+        return [head(feats) for head in self.heads]
 
     def _shared_step(self, batch):
-        x, y = batch["input"], batch["targets"]
+        x, y = batch["input"], batch["targets"]  # y: (B, num_heads)
         logits = self(x)
-        loss = self.criterion(logits, y)
-        return loss, logits, y
+        head_losses = torch.stack(
+            [self.criterion(logits[i], y[:, i]) for i in range(self.num_heads)]
+        )
+        loss = (head_losses * self.head_weights).sum()  # combined loss
+        return loss, head_losses, logits, y
 
     def training_step(self, batch, batch_idx):
-        loss, preds, targets = self._shared_step(batch)
-        acc = self.train_acc(preds, targets)
-        
-        self.log_dict({
-            "train_loss": loss,
-            "train_acc": acc
-        }, on_step=True, on_epoch=True, prog_bar=True)
+        loss, head_losses, logits, y = self._shared_step(batch)
+        log = {}
+        for i in range(self.num_heads):
+            log[f"train_loss_h{i}"] = head_losses[i]
+            log[f"train_acc_h{i}"] = self.train_acc[i](logits[i], y[:, i])
+        self.log_dict(log, on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, preds, targets = self._shared_step(batch)
-        acc = self.val_acc(preds, targets)
-        
-        self.log_dict({
-            "val_loss": loss,
-            "val_acc": acc
-        }, on_epoch=True, prog_bar=True)
+        loss, head_losses, logits, y = self._shared_step(batch)
+        log = {}
+        accs = []
+        for i in range(self.num_heads):
+            log[f"val_loss_h{i}"] = head_losses[i]
+            acc = self.val_acc[i](logits[i], y[:, i])
+            log[f"val_acc_h{i}"] = acc
+            accs.append(acc)
+        self.log_dict(log, on_epoch=True, prog_bar=False)
+        self.log("val_loss", loss, on_epoch=True, prog_bar=True)
+        self.log("val_acc_mean", torch.stack(accs).mean(), on_epoch=True, prog_bar=True)
 
     def predict_step(self, batch, batch_idx):
-        _, preds, y = self._shared_step(batch)
-        file_path = batch["filename"]
-        return preds, y, file_path
+        _, _, logits, y = self._shared_step(batch)
+        return logits, y  # list of per-head (B, C_i) tensors, and (B, num_heads) targets
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=1e-2)
@@ -82,58 +123,42 @@ class OCTClassifier(L.LightningModule):
 # 2. LightningDataModule: MONAI Transforms & Data Loaders
 # ==============================================================================
 class OCTDataModule(L.LightningDataModule):
-    def __init__(
-        self, 
-        train_files: list, 
-        val_files: list, 
-        batch_size: int = 32, 
-        num_workers: int = 8
-    ):
+    def __init__(self, train_files, val_files, batch_size: int = 32, num_workers: int = 8):
+        """train_files / val_files: a list of dicts, or a path to a JSON file holding one.
+        Each dict: {"input": "path/to/vol", "targets": [t0, ..., t6]}"""
         super().__init__()
-        self.train_files = train_files
-        with open(train_files, "r") as f:
-            self.train_files = json.load(f)
-        self.val_files = val_files
-        with open(val_files, "r") as f:
-            self.val_files = json.load(f)
+        self.train_files = self._load(train_files)
+        self.val_files = self._load(val_files)
         self.batch_size = batch_size
         self.num_workers = num_workers
 
-        # Transforms designed for 512x496x97 OCT volumes
         self.transforms = Compose([
-            CopyItemsd(keys="input", names="filename"),
-            LoadImaged(keys=["input"],image_only=True),
+            LoadImaged(keys=["input"]),
             EnsureChannelFirstd(keys=["input"]),
             ScaleIntensityd(keys=["input"]),
-            Resized(
-                keys=["input"], 
-                spatial_size=(128, 128, 128), 
-                mode="trilinear"
-            ),
+            Resized(keys=["input"], spatial_size=(128, 128, 128), mode="trilinear"),
+            ToTensord(keys=["input"]),
+            ToTensord(keys=["targets"], dtype=torch.long),  # (7,) -> (B, 7) after collate
         ])
 
+    @staticmethod
+    def _load(x):
+        if isinstance(x, (str, bytes)) or hasattr(x, "__fspath__"):
+            with open(x, "r") as f:
+                return json.load(f)
+        return x
+
     def train_dataloader(self):
-        # Using MONAI's Dataset (or CacheDataset for faster training)
         from monai.data import Dataset
-        train_ds = Dataset(data=self.train_files, transform=self.transforms)
-        return DataLoader(
-            train_ds, 
-            batch_size=self.batch_size, 
-            shuffle=True, 
-            num_workers=self.num_workers,
-            pin_memory=True
-        )
+        ds = Dataset(data=self.train_files, transform=self.transforms)
+        return DataLoader(ds, batch_size=self.batch_size, shuffle=True,
+                          num_workers=self.num_workers, pin_memory=True)
 
     def val_dataloader(self):
         from monai.data import Dataset
-        val_ds = Dataset(data=self.val_files, transform=self.transforms)
-        return DataLoader(
-            val_ds, 
-            batch_size=self.batch_size, 
-            shuffle=False, 
-            num_workers=self.num_workers,
-            pin_memory=True
-        )
+        ds = Dataset(data=self.val_files, transform=self.transforms)
+        return DataLoader(ds, batch_size=self.batch_size, shuffle=False,
+                          num_workers=self.num_workers, pin_memory=True)
 
 
 # ==============================================================================
@@ -141,28 +166,22 @@ class OCTDataModule(L.LightningDataModule):
 # ==============================================================================
 if __name__ == "__main__":
     simple_profiler = SimpleProfiler(dirpath=".", filename="simple_profile_output")
-    # Example dictionary structure for MONAI transforms:
-    # train_files = [{"image": "path/to/oct1.nii.gz", "label": 0}, ...]
-    with open("../local_data/train.json","r") as f:
-        train_list = json.load(f)
-    with open("../local_data/val.json","r") as f:
-        val_list = json.load(f)
-    # Initialize DataModule & Model
-    datamodule = OCTDataModule(train_files=train_list, val_files=val_list, batch_size=32)
-    model = OCTClassifier(num_classes=6, lr=1e-4)
 
-    # Initialize PyTorch Lightning Trainer
+    datamodule = OCTDataModule(
+        train_files="../local_data/train.json",
+        val_files="../local_data/val.json",
+        batch_size=32,
+    )
+    # One entry per head: number of classes for each of the n heads (placeholder values)
+    model = OCTClassifier(num_classes=(5, 5, 5, 5, 3, 6, 5,5), lr=1e-4)
+
     trainer = L.Trainer(
         max_epochs=2,
-        accelerator="auto",       # Uses CUDA if available
+        accelerator="auto",
         devices=1,
-        precision="16-mixed",     # Mixed precision saves VRAM for 3D volumes
+        precision="16-mixed",
         log_every_n_steps=50,
-        profiler=simple_profiler
+        profiler=simple_profiler,
     )
-
-    # To run training:
     trainer.fit(model, datamodule=datamodule)
-    #output = trainer.predict(model,datamodule.val_dataloader())
-    #print(output)
-    #torch.save(output,"output.tensor")
+
