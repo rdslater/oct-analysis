@@ -54,6 +54,10 @@ class OCTClassifier(L.LightningModule):
             layers=(3, 4, 6, 3),
         )
         feat_dim = self.backbone.last_linear.in_features
+        # This fools the MONAI model by just passing through the final layer with no learning
+        # Otherwise the packaged model forces a final linear layer
+        # it replaces the num_classes
+
         self.backbone.last_linear = nn.Identity()
 
         # One linear head per target, each with its own number of classes
@@ -138,7 +142,7 @@ class OCTDataModule(L.LightningDataModule):
             ScaleIntensityd(keys=["input"]),
             Resized(keys=["input"], spatial_size=(128, 128, 128), mode="trilinear"),
             ToTensord(keys=["input"]),
-            ToTensord(keys=["targets"], dtype=torch.long),  # (7,) -> (B, 7) after collate
+            ToTensord(keys=["targets"], dtype=torch.long),  # (n,) -> (B, n) after collate
         ])
 
     @staticmethod
@@ -160,10 +164,10 @@ class OCTDataModule(L.LightningDataModule):
         return DataLoader(ds, batch_size=self.batch_size, shuffle=False,
                           num_workers=self.num_workers, pin_memory=True)
 
+#####################
+# Simple model test #
+#####################
 
-# ==============================================================================
-# 3. Execution Example
-# ==============================================================================
 if __name__ == "__main__":
     simple_profiler = SimpleProfiler(dirpath=".", filename="simple_profile_output")
 
