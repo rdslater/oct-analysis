@@ -27,4 +27,4 @@ echo "Job started on node: $(hostname)"
 echo "Using GPU: $CUDA_VISIBLE_DEVICES"
 
 # Run Python script
-python3 -u train.py --config configs/layers_3483.yaml 
+python3 -u train.py --config configs/layers_3683.yaml 
