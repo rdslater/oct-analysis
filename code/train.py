@@ -69,7 +69,7 @@ def main():
     logger.log_hyperparams({
 	"config":cfg,
 	"model_class":type(model).__name__,
-	"backbone":type(model.model).__name__,
+	"backbone":type(model.backbone).__name__,
 	"optimizer":{
 		"name":"AdamW",
 		"weight_decay":0.01,
