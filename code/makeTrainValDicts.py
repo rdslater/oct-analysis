@@ -1,6 +1,13 @@
 import pandas as pd
 import json
-
+COLUMNS = ["Cystoid Spaces",
+           "ERM",
+            "Intraretinal Fluid",
+            "Macular Hole",
+            "OCT Confidence Score",
+            "PVD",
+            "RTD",
+            "SSRD Presence"]
 data = pd.read_csv("../local_data/CVData5Splits.csv")
 train_list = []
 val_list = []
@@ -9,7 +16,7 @@ for _, row in data.iterrows():
     tmp = {}
     location = f"{BASE}SUBJECTS/{row['RandomizedSubjectId']}/SESSIONS/{row['TimePoint']}/ACQUISITIONS/{row['Procedure']}/FILES/{row['Filename']}"
     tmp["input"] = location
-    tmp["targets"] = row['Cystoid Spaces']
+    tmp["targets"] = row[COLUMNS].tolist()
     if row['fold'] > 0:
         train_list.append(tmp)
     else:

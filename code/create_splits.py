@@ -2,7 +2,7 @@ from sklearn.model_selection import GroupKFold
 import pandas as pd
 # Initialize GroupKFold with 5 splits
 gkf = GroupKFold(n_splits=5,random_state=13,shuffle=True)
-df = pd.read_csv("../local_data/OCT-ANALYSIS_INVENTORY.csv")
+df = pd.read_csv("../local_data/OCT-ANALYSIS_INVENTORY_MULTI_CLEANED.csv")
 # Create an empty column for fold assignments
 df["fold"] = -1
 
