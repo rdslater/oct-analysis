@@ -9,6 +9,8 @@ from datetime import datetime
 from fnmatch import fnmatchcase
 from pathlib import Path
 import sys
+import json
+import os
 
 import matplotlib
 matplotlib.use("Agg")
@@ -16,9 +18,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import pandas as pd
 import yaml
-
-
-METRICS = ["train_acc_epoch", "val_acc", "train_loss_epoch", "val_loss"]
+from summarize_metrics import load_epochs, metric_stats, head_ids
 
 
 def nested(mapping, *keys):
@@ -41,30 +41,6 @@ def display(value):
     return value
 
 
-def load_epochs(path):
-    """Merge sparse epoch rows; never average sampled batch metrics.
-
-    Retain the last non-null value per epoch and metric. Multiple validation
-    checks within one epoch are collapsed, so this is not a checkpoint audit.
-    """
-    raw = pd.read_csv(path)
-    if not {"epoch", "val_loss"}.issubset(raw.columns):
-        raise ValueError("CSV must contain epoch and val_loss columns")
-    data = raw.reindex(columns=["epoch", *METRICS]).apply(pd.to_numeric, errors="coerce")
-    data = data.replace([float("inf"), float("-inf")], float("nan"))
-    data = data.dropna(subset=["epoch"])
-    if ((data["epoch"] < 0) | (data["epoch"] % 1 != 0)).any():
-        raise ValueError("Epoch values must be non-negative integers")
-    if not data["epoch"].is_monotonic_increasing:
-        raise ValueError("Epoch order decreases; check for mixed or restarted runs")
-    data = data.dropna(subset=METRICS, how="all")
-    epochs = data.groupby("epoch", sort=True)[METRICS].last()
-    epochs.index = epochs.index.astype(int)
-    if epochs.empty or epochs["val_loss"].dropna().empty:
-        raise ValueError("No finite epoch-level validation loss recorded")
-    return epochs
-
-
 def load_run(directory, run_id, notices):
     """Read one run and calculate descriptive validation statistics."""
     epochs = load_epochs(directory / "metrics.csv")
@@ -82,6 +58,30 @@ def load_run(directory, run_id, notices):
         value = nested(cfg, "model", key)
         return nested(hp, key) if value is None else value
 
+    classes = model_value("num_classes")
+    stats = metric_stats(epochs)
+    heads = head_ids(epochs.columns)
+    metadata_multi = isinstance(classes, (list, tuple))
+    metadata_mode = "multihead" if metadata_multi else "single"
+    if classes is not None and metadata_mode != stats["task_type"]:
+        notices.append(f"{run_id}: metric schema and num_classes disagree; task grouping is unverified.")
+        classes = None
+    weights = model_value("head_weights")
+    if metadata_multi and weights is None:
+        weights = [1.0 / len(classes)] * len(classes) if classes else None
+    elif weights is not None:
+        try:
+            weights = [float(w) for w in weights]
+            total = sum(weights)
+            if total <= 0 or any(w < 0 for w in weights):
+                raise ValueError("Invalid head weights")
+            weights = [w / total for w in weights]
+        except (TypeError, ValueError):
+            notices.append(f"{run_id}: head weights are invalid; grouping is unverified.")
+            weights = None
+            classes = None
+    if metadata_multi and classes and heads != list(range(len(classes))):
+        notices.append(f"{run_id}: observed head indices do not match num_classes; metrics may be incomplete.")
     row = {
         "run": run_id,
         "model": display(hp.get("backbone", hp.get("backstone"))),
@@ -89,6 +89,8 @@ def load_run(directory, run_id, notices):
         "layers": display(model_value("layers")),
         "lr": display(model_value("lr")),
         "num_classes": display(model_value("num_classes")),
+        "num_heads": len(classes) if isinstance(classes, (list, tuple)) else (1 if classes is not None else "unknown"),
+        "head_weights": display(weights),
         "batch_size": display(nested(cfg, "data", "batch_size")),
         "num_workers": display(nested(cfg, "data", "num_workers")),
         "seed": display(nested(cfg, "seed")),
@@ -102,16 +104,16 @@ def load_run(directory, run_id, notices):
         "validation_epochs": int(epochs["val_loss"].count()),
         "last_epoch": int(epochs.index[-1]),
     }
-    best = int(epochs["val_loss"].idxmin())
-    row.update(
-        min_val_loss=float(epochs.loc[best, "val_loss"]),
-        best_loss_epoch=best,
-        best_loss_round=best + 1,
-        val_acc_at_min_loss=epochs.loc[best, "val_acc"],
-        max_val_acc=epochs["val_acc"].max(),
-        last_val_loss=epochs["val_loss"].iloc[-1],
-        last_val_acc=epochs["val_acc"].iloc[-1],
-    )
+    row.update(stats)
+    # Never place single-task and combined multihead losses in one ranking.
+    # Missing task metadata receives a separate group rather than guessed defaults.
+    signature = {
+        "task": stats["task_type"], "classes": classes, "weights": weights,
+        "val_files": nested(cfg, "data", "val_files"),
+    }
+    if classes is None or signature["val_files"] is None:
+        signature["unverified_run"] = run_id
+    row["comparison_group"] = json.dumps(signature, sort_keys=True)
     return row, epochs
 
 
@@ -128,8 +130,13 @@ def compare_runs(root, output=None, includes=None, excludes=None, include_smoke=
     notices = []
     rows, curves = [], {}
     matched = set()
-    candidates = sorted({p.parent for p in root.rglob("metrics.csv")} |
-                        {p.parent for p in root.rglob("hparams.yaml")})
+    candidates = []
+    for folder, directories, files in os.walk(root):
+        # Prune generated reports and local caches before descending.
+        directories[:] = sorted(d for d in directories if d not in {"comparisons", "__pycache__", ".git"})
+        if "metrics.csv" in files or "hparams.yaml" in files:
+            candidates.append(Path(folder))
+    candidates.sort()
     for directory in candidates:
         run_id = directory.relative_to(root).as_posix()
         parts = directory.relative_to(root).parts
@@ -155,16 +162,20 @@ def compare_runs(root, output=None, includes=None, excludes=None, include_smoke=
     if not rows:
         raise ValueError("No usable selected runs. " + "\n".join(notices))
 
-    table = pd.DataFrame(rows).sort_values(["min_val_loss", "run"], kind="stable")
+    table = pd.DataFrame(rows).sort_values(["comparison_group", "min_val_loss", "run"], kind="stable")
+    table.insert(1, "rank_in_group", table.groupby("comparison_group", sort=False).cumcount() + 1)
     for field in ["model", "layers", "lr", "batch_size", "seed", "max_epochs",
-                  "num_classes", "train_files", "val_files", "early_stopping", "optimizer", "scheduler"]:
+                  "num_classes", "head_weights", "train_files", "val_files", "early_stopping", "optimizer", "scheduler"]:
         values = table[field].astype(str)
         if (values == "unknown").any():
             notices.append(f"Missing configuration: {field} is unknown for some runs.")
         if values[values != "unknown"].nunique() > 1:
             notices.append(f"Configuration differs across selected runs: {field}.")
     notices.extend([
-        "Rows are sorted by observed minimum val_loss, not by proven model quality.",
+        "Rows are ranked by minimum recorded val_loss within task groups only; there is no overall ranking across groups.",
+        "Groups distinguish task style, class counts, normalized head weights, and stored validation manifest paths. Unknown task metadata is isolated per run.",
+        "Grouping does not prove scientific comparability: verify target order/names, data contents, preprocessing, loss definition, and metric averaging.",
+        "accuracy_metric identifies val_acc versus val_acc_mean. Mean head accuracy is not all-heads-correct accuracy.",
         "Equal manifest paths do not prove equal data. Verify split contents, preprocessing, loss definition, and metric averaging manually.",
         "CSV files do not establish job completion or early-stopping reasons. Active or interrupted runs may be included; compare completed runs explicitly.",
         "Epochs are zero-based in the CSV; rounds and the plot are one-based. Accuracy values are fractions, not percentages.",
@@ -179,22 +190,29 @@ def compare_runs(root, output=None, includes=None, excludes=None, include_smoke=
     output.mkdir(parents=True, exist_ok=False)
     table.to_csv(output / "comparison.csv", index=False, na_rep="")
 
-    fig, ax = plt.subplots(figsize=(11, 6))
-    for i, row in enumerate(table.to_dict("records")):
-        epochs = curves[row["run"]]
-        label = f'{row["run"]} (layers={row["layers"]}, lr={row["lr"]})'
-        ax.plot(epochs.index + 1, epochs["val_loss"], label=label,
-                marker="o", markersize=3, linestyle=["-", "--", "-.", ":"][i % 4])
-    ax.set(title="Recorded validation loss across runs", xlabel="Epoch (starting at 1)", ylabel="Validation loss")
-    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-    ax.grid(alpha=0.25)
-    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=8)
+    groups = list(table.groupby("comparison_group", sort=False))
+    fig, axes = plt.subplots(len(groups), 1, figsize=(11, 5 * len(groups)), squeeze=False)
+    for number, (signature, group) in enumerate(groups):
+        ax = axes[number, 0]
+        for i, row in enumerate(group.to_dict("records")):
+            epochs = curves[row["run"]]
+            label = f'{row["run"]} (layers={row["layers"]}, lr={row["lr"]})'
+            ax.plot(epochs.index + 1, epochs["val_loss"], label=label,
+                    marker="o", markersize=3, linestyle=["-", "--", "-.", ":"][i % 4])
+        info = json.loads(signature)
+        ax.set(title=f'Group {number + 1}: {info["task"]}, classes={info["classes"]}',
+               xlabel="Epoch (starting at 1)", ylabel="Validation loss")
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.grid(alpha=0.25)
+        ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=8)
+        notices.append(f"Plot group {number + 1}: {signature}")
+    fig.tight_layout()
     fig.savefig(output / "validation_loss_overlay.png", dpi=180, bbox_inches="tight")
     plt.close(fig)
     (output / "comparison_notes.txt").write_text(
         f"Source root: {root}\nIncluded runs: {len(rows)}\n\n" +
         "\n".join(notices) + "\n", encoding="utf-8")
-    print(table[["run", "layers", "lr", "min_val_loss", "val_acc_at_min_loss", "best_loss_round"]].to_string(index=False))
+    print(table[["run", "task_type", "rank_in_group", "layers", "lr", "min_val_loss", "accuracy_metric", "val_acc_at_min_loss", "best_loss_round"]].to_string(index=False))
     for notice in notices:
         print(f"NOTE: {notice}")
     print(f"Comparison saved to: {output}")
