@@ -1,0 +1,65 @@
+backbone: SEResNet50
+config:
+  checkpoint:
+    filename: best
+    mode: min
+    monitor: val_loss
+    save_last: true
+    save_top_k: 1
+  data:
+    batch_size: 8
+    num_workers: 4
+    train_files: ../local_data/train.json
+    val_files: ../local_data/val.json
+  early_stopping:
+    min_delta: 0.0
+    mode: min
+    monitor: val_loss
+    patience: 5
+  experiment_name: multihead_test
+  model:
+    layers:
+    - 3
+    - 4
+    - 8
+    - 3
+    lr: 0.001
+    num_classes:
+    - 5
+    - 5
+    - 5
+    - 5
+    - 3
+    - 6
+    - 5
+    - 5
+  seed: 271828
+  trainer:
+    accelerator: auto
+    devices: 1
+    max_epochs: 100
+head_weights: null
+layers:
+- 3
+- 4
+- 8
+- 3
+lr: 0.001
+model_class: OCTClassifier
+num_classes: !!python/tuple
+- 5
+- 5
+- 5
+- 5
+- 3
+- 6
+- 5
+- 5
+num_heads: 8
+optimizer:
+  name: AdamW
+  weight_decay: 0.01
+scheduler:
+  T_max: 10
+  name: CosineAnnealingLR
+task_type: multihead
