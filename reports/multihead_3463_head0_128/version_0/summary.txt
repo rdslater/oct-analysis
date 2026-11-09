@@ -1,0 +1,97 @@
+Run: /home/wisc/jiang452/oct-score2-runs/multihead_3463_head0_128/version_0
+Task type: multihead
+Epochs with recorded metrics: 30
+Training completion and stop reasons are not inferred from this CSV.
+Metrics retain their last non-null value per epoch; step metrics are excluded.
+Mean head accuracy is not the fraction of samples with all heads correct.
+
+Lowest val_loss: epoch 24 (round 25)
+  val_loss: 0.5854
+  val_acc_mean: 78.00%
+Highest val_acc_mean: 79.20%
+  epoch 26 (round 27)
+
+Head 0 at best combined-loss epoch:
+  val_loss_h0: 0.8356
+  val_acc_h0: 70.00%
+  Independent min loss: 0.8044 (round 22)
+  Independent max acc: 70.65% (round 27)
+
+Head 1 at best combined-loss epoch:
+  val_loss_h1: 0.9556
+  val_acc_h1: 60.11%
+  Independent min loss: 0.8871 (round 11)
+  Independent max acc: 64.02% (round 27)
+
+Head 2 at best combined-loss epoch:
+  val_loss_h2: 0.8703
+  val_acc_h2: 64.24%
+  Independent min loss: 0.8557 (round 22)
+  Independent max acc: 66.74% (round 27)
+
+Head 3 at best combined-loss epoch:
+  val_loss_h3: 0.0935
+  val_acc_h3: 98.04%
+  Independent min loss: 0.0873 (round 28)
+  Independent max acc: 98.26% (round 29)
+
+Head 4 at best combined-loss epoch:
+  val_loss_h4: 0.1034
+  val_acc_h4: 97.83%
+  Independent min loss: 0.1034 (round 25)
+  Independent max acc: 97.93% (round 26)
+
+Head 5 at best combined-loss epoch:
+  val_loss_h5: 0.4737
+  val_acc_h5: 85.43%
+  Independent min loss: 0.4609 (round 29)
+  Independent max acc: 85.43% (round 25)
+
+Head 6 at best combined-loss epoch:
+  val_loss_h6: 0.9825
+  val_acc_h6: 59.78%
+  Independent min loss: 0.9328 (round 10)
+  Independent max acc: 63.59% (round 27)
+
+Head 7 at best combined-loss epoch:
+  val_loss_h7: 0.3685
+  val_acc_h7: 88.59%
+  Independent min loss: 0.3684 (round 26)
+  Independent max acc: 89.57% (round 10)
+
+Last recorded epoch: 29 (round 30)
+  train_acc_h0_epoch: 82.73%
+  train_acc_h1_epoch: 76.44%
+  train_acc_h2_epoch: 77.25%
+  train_acc_h3_epoch: 98.72%
+  train_acc_h4_epoch: 98.94%
+  train_acc_h5_epoch: 88.56%
+  train_acc_h6_epoch: 75.92%
+  train_acc_h7_epoch: 90.41%
+  train_loss_epoch: 0.3794
+  train_loss_h0_epoch: 0.4804
+  train_loss_h1_epoch: 0.6150
+  train_loss_h2_epoch: 0.5594
+  train_loss_h3_epoch: 0.0607
+  train_loss_h4_epoch: 0.0467
+  train_loss_h5_epoch: 0.3446
+  train_loss_h6_epoch: 0.6348
+  train_loss_h7_epoch: 0.2932
+  val_acc_h0: 68.48%
+  val_acc_h1: 63.26%
+  val_acc_h2: 63.04%
+  val_acc_h3: 98.26%
+  val_acc_h4: 97.72%
+  val_acc_h5: 85.33%
+  val_acc_h6: 63.04%
+  val_acc_h7: 88.48%
+  val_acc_mean: 78.45%
+  val_loss: 0.6061
+  val_loss_h0: 0.9231
+  val_loss_h1: 0.9611
+  val_loss_h2: 0.9299
+  val_loss_h3: 0.0983
+  val_loss_h4: 0.1148
+  val_loss_h5: 0.4649
+  val_loss_h6: 0.9812
+  val_loss_h7: 0.3752
