@@ -28,6 +28,7 @@ class OCTClassifier(L.LightningModule):
         lr: float = 1e-4,
         head_weights: Sequence[float] = None,
 	layers: Sequence[int] = (3,4,6,3),
+        head0_hidden_dim: int = 0,
     ):
         """
         num_classes : tuple/list with the number of classes for each head.
@@ -63,7 +64,12 @@ class OCTClassifier(L.LightningModule):
 
         # One linear head per target, each with its own number of classes
         self.heads = nn.ModuleList([nn.Linear(feat_dim, c) for c in self.num_classes])
-
+        if head0_hidden_dim > 0:
+          self.heads[0] = nn.Sequential(
+            nn.Linear(feat_dim, head0_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(head0_hidden_dim, self.num_classes[0]),
+          )
         self.criterion = nn.CrossEntropyLoss()
 
         w = torch.ones(self.num_heads) if head_weights is None else torch.tensor(head_weights, dtype=torch.float)
