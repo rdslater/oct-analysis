@@ -48,7 +48,7 @@ def main():
         / cfg["experiment_name"]
         / "checkpoints"
     )
-    PATH = "/mnt/scratch/group/domalpally/oct-score2/code/outputs/baseline/checkpoints/best-v2.ckpt"
+    PATH = "/mnt/scratch/group/domalpally/oct-score2/code/outputs/baseline/checkpoints/best-v4.ckpt"
     model = OCTClassifier.load_from_checkpoint(PATH, **cfg["model"],weights_only=False)
     # 2. Extract and restore each component
     trainer = L.Trainer(
